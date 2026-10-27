@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#10100f">
+    <link rel="icon" href="img/favicon.svg" type="image/svg+xml">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Panel de barberos | La Firms</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Oswald:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="Style.css">
+</head>
+<body class="finance-page">
+    <main class="finance-shell">
+        <header class="finance-header">
+            <a class="finance-brand" href="index.html" aria-label="Volver a La Firms"><img src="img/logo.jpg" alt=""><span>LA FIRMS<small>PANEL DE BARBEROS</small></span></a>
+            <a class="finance-back" href="index.html">Volver al sitio ↗</a>
+        </header>
+        <section class="finance-auth" id="barber-auth" hidden>
+            <p class="eyebrow dark-eyebrow">ACCESO PRIVADO</p>
+            <h1>Panel de barberos</h1>
+            <p>Ingresa la contraseña para continuar.</p>
+            <form id="barber-login-form" class="finance-card">
+                <h2>Acceso</h2>
+                <label for="barber-password">Contraseña</label>
+                <input id="barber-password" name="password" type="password" maxlength="128" autocomplete="current-password" required>
+                <button class="button button-gold finance-submit" type="submit">ENTRAR <span>↗</span></button>
+            </form>
+            <p class="finance-message" id="barber-auth-message" role="status" aria-live="polite"></p>
+        </section>
+        <section class="appointments-dashboard" id="barber-dashboard" hidden>
+            <div class="finance-dashboard-heading">
+                <div><p class="eyebrow dark-eyebrow">BARBEROS</p><h1>Mis citas</h1></div>
+                <div class="finance-dashboard-actions"><a class="finance-logout" href="finanzas.html">Administración</a><button class="finance-logout" id="barber-logout" type="button">Cerrar sesión</button></div>
+            </div>
+            <p class="appointments-intro">Consulta y gestiona las citas asignadas.</p>
+            <div class="appointment-filters">
+                <div>
+                    <label class="finance-month-label" for="barber-month">Mes</label>
+                    <div class="finance-month-picker">
+                        <button id="barber-month-previous" type="button" aria-label="Mes anterior">‹</button>
+                        <span id="barber-month-name" aria-live="polite"></span>
+                        <button id="barber-month-next" type="button" aria-label="Mes siguiente">›</button>
+                    </div>
+                    <input id="barber-month" type="hidden">
+                </div>
+                <div>
+                    <label class="finance-month-label" for="barber-status-filter">Estado</label>
+                    <select class="appointment-status-filter" id="barber-status-filter">
+                        <option value="todas">Todos los estados</option>
+                        <option value="pendiente">Pendientes</option>
+                        <option value="confirmada">Confirmadas</option>
+                        <option value="atendida">Atendidas</option>
+                        <option value="cancelada">Canceladas</option>
+                    </select>
+                </div>
+            </div>
+            <p class="finance-message" id="barber-error" role="alert"></p>
+            <div class="appointment-list" id="barber-list" aria-live="polite"></div>
+            <p class="appointment-empty" id="barber-empty" hidden>No hay citas para los filtros seleccionados.</p>
+        </section>
+        <p class="finance-message" id="barber-load-error" role="alert"></p>
+    </main>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="supabase-client.js"></script>
+    <script>
+        const authPanel = document.querySelector('#barber-auth');
+        const dashboard = document.querySelector('#barber-dashboard');
+        const loginForm = document.querySelector('#barber-login-form');
+        const authMessage = document.querySelector('#barber-auth-message');
+        const loadError = document.querySelector('#barber-load-error');
+        const errorMessage = document.querySelector('#barber-error');
+        const list = document.querySelector('#barber-list');
+        const emptyMessage = document.querySelector('#barber-empty');
+        const monthInput = document.querySelector('#barber-month');
+        const monthName = document.querySelector('#barber-month-name');
+        const statusFilter = document.querySelector('#barber-status-filter');
+        const monthFormatter = new Intl.DateTimeFormat('es-CO', { month: 'long', year: 'numeric', timeZone: 'America/Bogota' });
+        const statusLabels = { pendiente: 'Pendiente', confirmada: 'Confirmada', atendida: 'Atendida', cancelada: 'Cancelada' };
+
+        const formatAppointmentDate = (date) => {
+            if (!date) return 'Fecha pendiente';
+            const [year, month, day] = date.split('-').map(Number);
+            return new Intl.DateTimeFormat('es-CO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(Date.UTC(year, month - 1, day, 12)));
+        };
+        const formatAppointmentTime = (time) => {
+            if (!time) return 'Hora pendiente';
+            const [hour, minute] = time.split(':').map(Number);
+            return new Intl.DateTimeFormat('es-CO', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'UTC' }).format(new Date(Date.UTC(2020, 0, 1, hour, minute)));
+        };
+
+        const showAuth = () => {
+            dashboard.hidden = true;
+            authPanel.hidden = false;
+            authMessage.textContent = '';
+            loadError.textContent = '';
+        };
+
+        const showDashboard = async () => {
+            authPanel.hidden = true;
+            dashboard.hidden = false;
+            loadError.textContent = '';
+            await loadAppointments();
+        };
+
+        loginForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const submitButton = loginForm.querySelector('button[type="submit"]');
+            submitButton.disabled = true;
+            authMessage.textContent = '';
+            try {
+                const password = document.querySelector('#barber-password').value;
+                const res = await fetch('/api/acceso', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ scope: 'barberos', password })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'No se pudo iniciar sesión.');
+                loginForm.reset();
+                await showDashboard();
+            } catch (error) {
+                authMessage.textContent = error.message;
+            } finally {
+                submitButton.disabled = false;
+            }
+        });
+
+        document.querySelector('#barber-logout').addEventListener('click', async () => {
+            try {
+                await fetch('/api/salir', { method: 'POST' });
+            } catch {
+                // Mostramos el acceso igualmente.
+            }
+            showAuth();
+        });
+
+        const renderMonth = () => {
+            const [year, month] = monthInput.value.split('-').map(Number);
+            monthName.textContent = monthFormatter.format(new Date(Date.UTC(year, month - 1, 15, 12)));
+        };
+        const changeMonth = (offset) => {
+            const [year, month] = monthInput.value.split('-').map(Number);
+            const nextMonth = new Date(Date.UTC(year, month - 1 + offset, 1, 12));
+            monthInput.value = `${nextMonth.getUTCFullYear()}-${String(nextMonth.getUTCMonth() + 1).padStart(2, '0')}`;
+            renderMonth();
+            loadAppointments().catch((error) => { loadError.textContent = error.message; });
+        };
+        document.querySelector('#barber-month-previous').addEventListener('click', () => changeMonth(-1));
+        document.querySelector('#barber-month-next').addEventListener('click', () => changeMonth(1));
+        statusFilter.addEventListener('change', () => {
+            loadAppointments().catch((error) => { loadError.textContent = error.message; });
+        });
+
+        const renderAppointments = (appointments) => {
+            list.replaceChildren();
+            emptyMessage.hidden = appointments.length > 0;
+            for (const appointment of appointments) {
+                const card = document.createElement('article');
+                card.className = 'appointment-card';
+                const header = document.createElement('div');
+                header.className = 'appointment-card-heading';
+                const customer = document.createElement('div');
+                const name = document.createElement('h2');
+                name.textContent = appointment.nombre || 'Cliente';
+                const phone = document.createElement('a');
+                phone.href = appointment.telefono ? `tel:${String(appointment.telefono).replace(/[^\d+]/g, '')}` : '#';
+                phone.textContent = appointment.telefono || 'Sin teléfono';
+                customer.append(name, phone);
+                const badge = document.createElement('span');
+                badge.className = `appointment-status-badge is-${appointment.status}`;
+                badge.textContent = statusLabels[appointment.status] || appointment.status || 'Pendiente';
+                header.append(customer, badge);
+
+                const details = document.createElement('div');
+                details.className = 'appointment-details';
+                for (const detail of [
+                    ['Fecha', formatAppointmentDate(appointment.appointment_date)],
+                    ['Hora', formatAppointmentTime(appointment.appointment_time)],
+                    ['Servicio', appointment.service || 'No especificado']
+                ]) {
+                    const item = document.createElement('p');
+                    const label = document.createElement('span');
+                    label.textContent = detail[0];
+                    const value = document.createElement('strong');
+                    value.textContent = detail[1];
+                    item.append(label, value);
+                    details.append(item);
+                }
+
+                const message = document.createElement('p');
+                message.className = 'appointment-message';
+                message.textContent = appointment.mensaje || 'Sin mensaje adicional.';
+
+                const actions = document.createElement('div');
+                actions.className = 'appointment-card-actions';
+                const actionLabel = document.createElement('label');
+                actionLabel.textContent = 'Actualizar estado';
+                actionLabel.htmlFor = `barber-status-${appointment.id}`;
+                const actionSelect = document.createElement('select');
+                actionSelect.id = `barber-status-${appointment.id}`;
+                actionSelect.setAttribute('aria-label', `Estado de la cita de ${appointment.nombre || 'cliente'}`);
+                for (const [value, label] of Object.entries(statusLabels)) {
+                    const option = document.createElement('option');
+                    option.value = value;
+                    option.textContent = label;
+                    option.selected = value === appointment.status;
+                    actionSelect.append(option);
+                }
+                actionSelect.addEventListener('change', async () => {
+                    actionSelect.disabled = true;
+                    errorMessage.textContent = '';
+                    try {
+                        const res = await fetch(`/api/finanzas/citas/${appointment.id}`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ status: actionSelect.value })
+                        });
+                        const data = await res.json();
+                        if (res.status === 401) {
+                            showAuth();
+                            return;
+                        }
+                        if (!res.ok) throw new Error(data.error || 'No se pudo actualizar el estado.');
+                        await loadAppointments();
+                    } catch (error) {
+                        errorMessage.textContent = error.message;
+                        actionSelect.value = appointment.status;
+                    } finally {
+                        actionSelect.disabled = false;
+                    }
+                });
+                actions.append(actionLabel, actionSelect);
+                card.append(header, details, message, actions);
+                list.append(card);
+            }
+        };
+
+        const loadAppointments = async () => {
+            errorMessage.textContent = '';
+            loadError.textContent = '';
+            const month = monthInput.value;
+            try {
+                const res = await fetch(`/api/finanzas/citas?month=${encodeURIComponent(month)}&status=${encodeURIComponent(statusFilter.value)}`);
+                if (res.status === 401) {
+                    showAuth();
+                    return;
+                }
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'No se pudieron consultar las citas.');
+                renderAppointments((data.appointments || []).map((appointment) => ({
+                    id: appointment.id,
+                    nombre: appointment.nombre || 'Cliente',
+                    telefono: appointment.telefono || '',
+                    mensaje: appointment.mensaje || '',
+                    appointment_date: appointment.appointmentDate || appointment.appointment_date,
+                    appointment_time: appointment.appointmentTime || appointment.appointment_time,
+                    service: appointment.service || 'No especificado',
+                    status: appointment.status || 'pendiente'
+                })));
+            } catch (error) {
+                loadError.textContent = error.message;
+            }
+        };
+
+        const todayParts = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
+        const today = Object.fromEntries(todayParts.map(({ type, value }) => [type, value]));
+        monthInput.value = `${today.year}-${today.month}`;
+        renderMonth();
+
+        (async () => {
+            try {
+                const res = await fetch('/api/acceso');
+                const data = await res.json();
+                if (data.barberos) {
+                    await showDashboard();
+                } else {
+                    showAuth();
+                }
+            } catch {
+                showAuth();
+                loadError.textContent = 'No se pudo conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.';
+            }
+        })();
+    </script>
+</body>
+</html>

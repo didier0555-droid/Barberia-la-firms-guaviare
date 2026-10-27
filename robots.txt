@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /finanzas
+Disallow: /citas
+Disallow: /barberos
+Disallow: /api/
